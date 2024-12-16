@@ -21,7 +21,7 @@ class UserManager(BaseUserManager):
 
         user = self.model(
             username=username,
-            email=self.normalize_email()
+            email=self.normalize_email(email)
 
         )
 
@@ -31,7 +31,7 @@ class UserManager(BaseUserManager):
 
     def create_superuser(self, username, email, password):
         user = self.create_user(
-            email=self.normalize_email(),
+            email=self.normalize_email(email),
             username=username,
             password=password,
         )
