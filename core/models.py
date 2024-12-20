@@ -10,9 +10,27 @@ from ckeditor.fields import RichTextField
 import requests
 import os
 from django.utils.safestring import mark_safe
+from decimal import Decimal
+from bs4 import BeautifulSoup
+from django.core.exceptions import ValidationError
 
 
 # Create your models here.
+
+
+def validate_image(file):
+    """
+    ولیدیشن برای بررسی تصویر آپلود شده.
+    """
+    # بررسی فرمت فایل
+    valid_extensions = ['jpg', 'jpeg', 'png']
+    if not file.name.split('.')[-1].lower() in valid_extensions:
+        raise ValidationError('فرمت تصویر معتبر نیست. لطفاً از فرمت‌های jpg, jpeg, png  استفاده کنید.')
+
+    # بررسی اندازه فایل (مثلاً حداکثر 2 مگابایت)
+    max_size = 2 * 1024 * 1024  # 2 مگابایت
+    if file.size > max_size:
+        raise ValidationError('اندازه تصویر نباید بیشتر از ۲ مگابایت باشد.')
 
 
 class UserManager(BaseUserManager):
@@ -111,11 +129,13 @@ class Products(models.Model):
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True, allow_unicode=True, null=True, blank=True)
     description = RichTextField()
-    price = models.DecimalField(max_digits=10, decimal_places=2)
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    ir_price = models.DecimalField(max_digits=10, decimal_places=0, null=True, blank=True)
     stock = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     is_sale = models.BooleanField(default=False)
     new_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    ir_new_price = models.DecimalField(max_digits=10, decimal_places=0, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_suggestion = models.BooleanField(default=False)
@@ -143,30 +163,30 @@ class Products(models.Model):
 
     image = models.ImageField(upload_to=get_upload_path, null=True, blank=True)
 
-    def get_price_in_toman(self):
-        '''
-        convert usd price to toman iran
-        '''
+    def get_usd_to_irr_rate(self):
+        url = 'https://www.tgju.org/profile/price_dollar_rl'
 
         try:
+            # ارسال درخواست به سایت
+            response = requests.get(url)
 
-            price_to_convert = self.new_price if self.new_price else self.price
-
-            response = requests.get("https://api.exchangerate-api.com/v4/latest/USD")
             if response.status_code == 200:
-                data = response.json()
-                # Convert to IRR
-                usd_to_irr = data['rates']['IRR']
-                return price_to_convert * usd_to_irr
+                # استفاده از BeautifulSoup برای تجزیه HTML
+                soup = BeautifulSoup(response.text, 'html.parser')
 
+                # پیدا کردن تگ <td> که قیمت دلار را در خود دارد
+                rate_tag = soup.find('td', class_='text-left')
+
+                # بررسی اینکه آیا نرخ پیدا شده است
+                if rate_tag:
+                    usd_to_irr = rate_tag.text.strip().replace(',', '')  # حذف کاما از عدد
+                    return int(usd_to_irr) * 10  # تبدیل به عدد صحیح (ریال)
+                else:
+                    return "Rate not found"
+            else:
+                return f"Failed to fetch the page. Status code: {response.status_code}"
         except Exception as e:
-            print('{e}:خطا در دریافت نرخ ارز')
-        return None
-
-    def discount_percentage(self):
-        if self.is_sale and self.new_price < self.price:
-            discount = (self.price - self.new_price) / self.price * 100
-            return round(discount, 2)
+            return f"An error occurred: {e}"
 
     def get_thumbnail(self):
         """
@@ -195,7 +215,7 @@ class ProductsImage(models.Model):
             filename
         )
 
-    image = models.ImageField(upload_to=get_upload_path,null=True, blank=True)
+    image = models.ImageField(upload_to=get_upload_path, null=True, blank=True)
 
     def __str__(self):
         return self.product.name
@@ -209,7 +229,7 @@ class Customer(models.Model):
         message='شماره شما باید با فرمت 09 وارد شود'
     )
 
-    phone = models.CharField(validators=[regex_phone], max_length=11)
+    phone_number = models.CharField(validators=[regex_phone], max_length=11)
     city = models.CharField(max_length=255)
     address = models.CharField(max_length=2500)
     postal_code = models.CharField(max_length=20)
@@ -227,6 +247,53 @@ class Customer(models.Model):
         return self.full_name
 
 
+class Vendors(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    first_name = models.CharField(max_length=255)
+    last_name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, unique=True, null=True, blank=True, allow_unicode=True)
+    email = models.EmailField(unique=True)
+    city = models.CharField(max_length=255)
+    address = models.CharField(max_length=2500)
+    phone_regex = RegexValidator(
+        regex=r'^09\d{9}$',
+        message='شماره شما باید با فرمت 09 وارد شود'
+    )
+
+    phone_number = models.CharField(validators=[phone_regex], max_length=11, unique=True)
+
+    code = models.CharField(max_length=20, unique=True, editable=False, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Vendor'
+        verbose_name_plural = 'Vendors'
+        db_table = 'vendor'
+        ordering = ['-created_at']
+        get_latest_by = 'created_at'
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            self.code = f"VNDR-{uuid.uuid4().hex[:8].upper()}"
+        if not self.slug:
+            self.slug = slugify(f'{self.first_name} {self.last_name}', allow_unicode=True)
+        super(Vendors, self).save(*args, **kwargs)
+
+    def get_total_profit(self):
+        # محاسبه مجموع سود از همه سفارشات مرتبط
+        orders = self.orders.all()  # دسترسی به سفارشات مرتبط با فروشنده
+        total_profit = round(sum(
+            order.calculate_total_price() * Decimal(0.1) for order in orders if order.status == 'Delivered'))
+        return total_profit
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name}"
+
+
+
+
+
 class Orders(models.Model):
     STATUS_CHOICES = (
         ('Pending', 'Pending'),
@@ -240,19 +307,19 @@ class Orders(models.Model):
         message='شماره شما باید با فرمت 09 وارد شود'
     )
 
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='orders')
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='orders', null=True, blank=True)
 
     phone_number = models.CharField(validators=[regex_phone], max_length=11)
     city = models.CharField(max_length=255)
     address = models.CharField(max_length=1500)
     postal_code = models.CharField(max_length=20)
-    identification_code = models.CharField(max_length=20)
+    identification_code = models.CharField(max_length=20, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Pending')
     products = models.ManyToManyField(Products, through='OrderItem')
-    total_price = models.DecimalField(max_digits=10, decimal_places=2)
     date_shipped = models.DateTimeField(null=True, blank=True)
+    vendor = models.ForeignKey(Vendors, on_delete=models.SET_NULL, related_name='orders', null=True, blank=True)
 
     class Meta:
         verbose_name = 'Order'
@@ -261,53 +328,145 @@ class Orders(models.Model):
         ordering = ['-created_at']
         get_latest_by = 'created_at'
 
-    def save(self, *args, **kwargs):
-        if self.status == 'Delivered' and self.date_shipped is None:
-            self.date_shipped = timezone.now()
-
-        super(Orders, self).save(*args, **kwargs)
-
-    def get_usd_to_toman_rate(self):
-        try:
-            response = requests.get("https://api.exchangerate-api.com/v4/latest/USD")
-            if response.status_code == 200:
-                data = response.json()
-                return data['rates']['IRR']
-        except Exception as e:
-            print(f"{e}: خطا در دریافت نرخ ارز")
-        return None
-
-    def calculate_total_price(self):
-        """
-        محاسبه قیمت کل سفارش بر اساس محصولات (به تومان)
-        """
-        usd_to_irr = self.get_usd_to_toman_rate()  # دریافت نرخ تبدیل
-        if not usd_to_irr:
-            return 0  # اگر نرخ تبدیل موجود نبود، مقدار صفر برگردانده شود
-
-        total = sum(item.get_total_price_in_toman(usd_to_irr) for item in self.order_items.all())
-        self.total_price = total
-        return total
+    # def save(self, *args, **kwargs):
+    #     if self.status == 'Delivered':
+    #         self.date_shipped = timezone.now()
+    #
+    #     super(Orders, self).save(*args, **kwargs)
 
     def save(self, *args, **kwargs):
-        """
-        قبل از ذخیره سفارش، قیمت کل را به‌روزرسانی می‌کنیم
-        """
-        self.calculate_total_price()
+        if not self.pk:
+            super().save(*args, **kwargs)
+            if self.vendor:
+                # افزودن سود به فروشنده
+                self.vendor.profit += self.calculate_total_price() * Decimal(0.1)  # 10% سود
+                self.vendor.save()
         super().save(*args, **kwargs)
+
+    # def get_usd_to_irr_rate(self):
+    #     url = 'https://www.tgju.org/profile/price_dollar_rl'
+    #
+    #     try:
+    #         # ارسال درخواست به سایت
+    #         response = requests.get(url)
+    #
+    #         if response.status_code == 200:
+    #             # استفاده از BeautifulSoup برای تجزیه HTML
+    #             soup = BeautifulSoup(response.text, 'html.parser')
+    #
+    #             # پیدا کردن تگ <td> که قیمت دلار را در خود دارد
+    #             rate_tag = soup.find('td', class_='text-left')
+    #
+    #             # بررسی اینکه آیا نرخ پیدا شده است
+    #             if rate_tag:
+    #                 usd_to_irr = rate_tag.text.strip().replace(',', '') # حذف کاما از عدد
+    #                 return int(usd_to_irr) * 10  # تبدیل به عدد صحیح (ریال)
+    #             else:
+    #                 return "Rate not found"
+    #         else:
+    #             return f"Failed to fetch the page. Status code: {response.status_code}"
+    #     except Exception as e:
+    #         return f"An error occurred: {e}"
+    #
+    # def calculate_total_price(self):
+    #     """
+    #     محاسبه قیمت کل سفارش بر اساس محصولات (به تومان)
+    #     """
+    #     usd_to_irr = self.get_usd_to_irr_rate()  # دریافت نرخ تبدیل
+    #     if not usd_to_irr:
+    #         return 0  # اگر نرخ تبدیل موجود نبود، مقدار صفر برگردانده شود
+    #
+    #     total = sum(item.get_usd_to_irr_rate(usd_to_irr) for item in self.order_items.all())
+    #     self.total_price = total
+    #     return total
+
+    # به دلل متغیر بودن قیمت ها از روش بالا صرف نظر شد
+    def calculate_total_price(self):
+        total_price = sum(item.get_total_price() for item in self.order_items.all())
+        return total_price
+
+    # def save(self, *args, **kwargs):
+    #     # ابتدا شیء را ذخیره کنید
+    #     if not self.pk:  # بررسی کنید که آیا شیء ذخیره شده است یا نه
+    #         super().save(*args, **kwargs)
+    #     # سپس قیمت کل را محاسبه کنید
+    #     self.calculate_total_price()
+    #     # ذخیره نهایی شیء
+    #     super().save(*args, **kwargs)
 
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Orders, on_delete=models.CASCADE, related_name='order_items')  # سفارش مرتبط
     product = models.ForeignKey('Products', on_delete=models.CASCADE, related_name='order_items')  # محصول مرتبط
     quantity = models.PositiveIntegerField(default=1)  # تعداد محصول
+    price = models.DecimalField(max_digits=10, decimal_places=0)
 
     def __str__(self):
         return f"{self.quantity} x {self.product.name}"
 
-    def get_total_price_in_toman(self, usd_to_irr):
+    def get_total_price(self):
+        return self.quantity * self.price
+
+    def save(self, *args, **kwargs):
+        if not self.pk:  # فقط برای آیتم‌های جدید
+            if self.product.stock < self.quantity:
+                raise ValueError(f"Not enough stock for {self.product.name}")
+            self.product.stock -= self.quantity
+            if self.product.stock == 0:  # غیرفعال کردن محصول در صورت صفر شدن موجودی
+                self.product.is_active = False
+            self.product.save()
+        super(OrderItem, self).save(*args, **kwargs)
+
+
+class VendorProfile(models.Model):
+    first_name = models.CharField(max_length=255)
+    last_name = models.CharField(max_length=255)
+    vendor_code = models.CharField(max_length=20, null=True, blank=True)
+    city = models.CharField(max_length=255, null=True, blank=True)
+    address = models.CharField(max_length=1500, null=True, blank=True)
+    phone_regex = RegexValidator(
+        regex=r'^09\d{9}$',
+        message='شماره شما باید با فرمت 09 وارد شود'
+    )
+    phone_number = models.CharField(validators=[phone_regex], max_length=11, unique=True)
+    profit = models.DecimalField(max_digits=10, decimal_places=0, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    vendor = models.ForeignKey(Vendors, on_delete=models.SET_NULL, related_name='profiles', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Vendor Profile'
+        verbose_name_plural = 'Vendor Profiles'
+        db_table = 'vendor_profile'
+        ordering = ['-created_at']
+        get_latest_by = 'created_at'
+
+    def get_total_profit(self):
         """
-        محاسبه قیمت کل این محصول در سفارش (به تومان)
+        محاسبه مجموع سود از سفارش‌هایی که توسط فروشنده انجام شده است.
         """
-        price_in_usd = self.product.new_price if self.product.new_price else self.product.price
-        return self.quantity * price_in_usd * usd_to_irr
+        orders = self.user.vendors.orders.all()  # فرض اینکه مدل Vendor متصل به Orders است
+        total_profit = sum(order.calculate_total_price() for order in orders if order.status == 'Delivered')
+        return total_profit
+
+    def get_upload_path(instance, filename):
+        full_name = f'{instance.first_name} {instance.last_name}'
+        return os.path.join('Profiles', full_name, filename)
+
+    profile_image = models.ImageField(upload_to=get_upload_path, null=True, blank=True, default='profile.jpg',
+                                      validators=[validate_image])
+
+    def get_profile_info(self):
+        """
+        بازگرداندن اطلاعات کلی فروشنده برای نمایش.
+        """
+        return {
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'profile_image': self.profile_image,
+            'vendor_code': self.vendor_code,
+            'city': self.city,
+            'address': self.address,
+            'phone_number': self.phone_number,
+            'total_profit': self.get_total_profit(),
+        }
