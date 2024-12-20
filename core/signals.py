@@ -18,7 +18,6 @@ def create_customer_from_order(sender, instance, created, **kwargs):
         instance.save()  # ذخیره مجدد سفارش برای ذخیره ارتباط با مشتری
 
 
-
 @receiver(post_save, sender=Products)
 def activate_product(sender, instance, **kwargs):
     if instance.stock > 0 and not instance.is_active:
