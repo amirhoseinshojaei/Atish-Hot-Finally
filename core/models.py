@@ -34,18 +34,18 @@ def validate_image(file):
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, username, password=None):
+    def create_user(self, email, phone_number, password=None):
         if not email:
-            raise ValueError('Users must have an email address')
+            raise ValueError('ایمیل خودرا وارد کنید')
 
-        if not username:
-            raise ValueError('Users must have an username')
+        if not phone_number:
+            raise ValueError('شماره تماس خودرا وارد کنید')
 
         if not password:
-            raise ValueError('Users must have a password')
+            raise ValueError('پسورد خود را وارد کنید')
 
         user = self.model(
-            username=username,
+            phone_number=phone_number,
             email=self.normalize_email(email)
 
         )
@@ -54,10 +54,10 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, username, email, password):
+    def create_superuser(self, phone_number, email, password):
         user = self.create_user(
             email=self.normalize_email(email),
-            username=username,
+            phone_number=phone_number,
             password=password,
         )
         user.is_admin = True
@@ -70,19 +70,21 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     full_name = models.CharField(max_length=255)
-    username = models.CharField(max_length=255, unique=True)
+    username = models.CharField(max_length=255, null=True, blank=True)
     email = models.EmailField(unique=True)
+    phone_regex = RegexValidator(
+        regex=r'^09\d{9}$',
+        message='شماره خودرا با فرمت صحیح 09 وارد کنید'
+    )
+    phone_number = models.CharField(validators=[phone_regex], max_length=11, unique=True)
     is_active = models.BooleanField(default=True)
     is_admin = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     is_superuser = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
     objects = UserManager()
-    USERNAME_FIELD = 'username'
-    REQUIRED_FIELDS = ['email']
-
-    def get_full_name(self):
-        return self.full_name
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ['phone_number', ]
 
     class Meta:
         verbose_name = 'user'
