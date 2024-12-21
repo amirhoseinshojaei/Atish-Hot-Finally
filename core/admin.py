@@ -1,5 +1,7 @@
 from django.contrib import admin
-from .models import User, Categories, Products, ProductsImage, Customer, Orders, OrderItem, Vendors, VendorProfile
+from .models import (User, Categories, Products, ProductsImage,
+                     Customer, Orders, OrderItem, Vendors, VendorProfile,
+                     Profile)
 
 
 # Register your models here.
