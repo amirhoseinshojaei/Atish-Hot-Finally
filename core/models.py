@@ -292,9 +292,6 @@ class Vendors(models.Model):
         return f"{self.first_name} {self.last_name}"
 
 
-
-
-
 class Orders(models.Model):
     STATUS_CHOICES = (
         ('Pending', 'Pending'),
@@ -342,6 +339,11 @@ class Orders(models.Model):
                 # افزودن سود به فروشنده
                 self.vendor.profit += self.calculate_total_price() * Decimal(0.1)  # 10% سود
                 self.vendor.save()
+            if self.identification_code and not self.vendor:
+                try:
+                    self.vendor = Vendors.objects.get(code=self.identification_code)
+                except Vendors.DoesNotExist:
+                    raise ValueError("فروشنده‌ای با این کد وجود ندارد.")
         super().save(*args, **kwargs)
 
     # def get_usd_to_irr_rate(self):
@@ -446,7 +448,7 @@ class VendorProfile(models.Model):
         """
         محاسبه مجموع سود از سفارش‌هایی که توسط فروشنده انجام شده است.
         """
-        orders = self.user.vendors.orders.all()  # فرض اینکه مدل Vendor متصل به Orders است
+        orders = self.vendors.orders.all()  # فرض اینکه مدل Vendor متصل به Orders است
         total_profit = sum(order.calculate_total_price() for order in orders if order.status == 'Delivered')
         return total_profit
 
