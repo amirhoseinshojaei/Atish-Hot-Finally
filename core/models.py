@@ -99,8 +99,39 @@ class User(AbstractBaseUser, PermissionsMixin):
     def has_module_perms(self, app_label):
         return True
 
+    def save(self, *args, **kwargs):
+        if not self.username:
+            self.username = f'{self.full_name}'
+        super(User, self).save(*args, **kwargs)
+
     def __str__(self):
-        return self.username
+        return self.email
+
+
+class Profile(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    full_name = models.CharField(max_length=255)
+    email = models.EmailField(unique=True)
+    phone_regex = RegexValidator(
+        regex=r'^09\d{9}$',
+        message='شماره خودرا با فرمت صحیح 09 وارد کنید'
+
+    )
+    phone_number = models.CharField(validators=[phone_regex], max_length=11, unique=True)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    purchases = models.JSONField(default=list, null=True, blank=True, verbose_name='purchases')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'profile'
+        verbose_name_plural = 'profiles'
+        db_table = 'profile'
+        ordering = ['-created_at']
+        get_latest_by = 'created_at'
+
+    def __str__(self):
+        return self.full_name
 
 
 class Categories(models.Model):
