@@ -16,6 +16,11 @@ class VendorProfileInline(admin.TabularInline):
     extra = 1
 
 
+class ProfileInline(admin.TabularInline):
+    model = Profile
+    extra = 1
+
+
 class OrdersItemInline(admin.TabularInline):
     model = OrderItem
     extra = 1
