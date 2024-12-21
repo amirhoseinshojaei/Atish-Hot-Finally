@@ -267,6 +267,7 @@ class Vendors(models.Model):
     code = models.CharField(max_length=20, unique=True, editable=False, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    profit = models.PositiveBigIntegerField(default=0)
 
     class Meta:
         verbose_name = 'Vendor'
@@ -276,8 +277,6 @@ class Vendors(models.Model):
         get_latest_by = 'created_at'
 
     def save(self, *args, **kwargs):
-        if not self.code:
-            self.code = f"VNDR-{uuid.uuid4().hex[:8].upper()}"
         if not self.slug:
             self.slug = slugify(f'{self.first_name} {self.last_name}', allow_unicode=True)
         super(Vendors, self).save(*args, **kwargs)
