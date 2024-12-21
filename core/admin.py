@@ -44,6 +44,7 @@ class UserAdmin(admin.ModelAdmin):
     search_fields = ('username', 'email')
     ordering = ('-date_joined',)
     readonly_fields = ('date_joined', 'last_login')
+    inlines = [ProfileInline]
 
     def has_add_permission(self, request):
         return request.user.is_superuser
